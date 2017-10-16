@@ -1,89 +1,30 @@
-/* --COPYRIGHT--,BSD_EX
- * Copyright (c) 2015, Texas Instruments Incorporated
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- * *  Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *
- * *  Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *
- * *  Neither the name of Texas Instruments Incorporated nor the names of
- *    its contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
- * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
- * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
- * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
- * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
- * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- *******************************************************************************
- *
- *                       MSP430 CODE EXAMPLE DISCLAIMER
- *
- * MSP430 code examples are self-contained low-level programs that typically
- * demonstrate a single peripheral function or device feature in a highly
- * concise manner. For this the code may rely on the device's power-on default
- * register values and settings such as the clock configuration and care must
- * be taken when combining code from several examples to avoid potential side
- * effects. Also see www.ti.com/grace for a GUI- and www.ti.com/msp430ware
- * for an API functional library-approach to peripheral configuration.
- *
- * --/COPYRIGHT--*/
-//******************************************************************************
-//  MSP430FR5x9x Demo - eUSCI_A0 UART echo at 9600 baud using BRCLK = 8MHz
-//
-//  Description: This demo echoes back characters received via a PC serial port.
-//  SMCLK/ DCO is used as a clock source and the device is put in LPM3
-//  The auto-clock enable feature is used by the eUSCI and SMCLK is turned off
-//  when the UART is idle and turned on when a receive edge is detected.
-//  Note that level shifter hardware is needed to shift between RS232 and MSP
-//  voltage levels.
-//
-//  The example code shows proper initialization of registers
-//  and interrupts to receive and transmit data.
-//  To test code in LPM3, disconnect the debugger.
-//
-//  ACLK = VLO, MCLK =  DCO = SMCLK = 8MHz
-//
-//                MSP430FR5994
-//             -----------------
-//       RST -|     P2.0/UCA0TXD|----> PC (echo)
-//            |                 |
-//            |                 |
-//            |     P2.1/UCA0RXD|<---- PC
-//            |                 |
-//
-//   William Goh
-//   Texas Instruments Inc.
-//   October 2015
-//   Built with IAR Embedded Workbench V6.30 & Code Composer Studio V6.1
-//******************************************************************************
 #include <msp430FR5994.h>
+//Keep track of total bytes to expect
 unsigned int totalBytes = 0;
+//Keep track of the current byte
 unsigned int byteCount = 0;
+int duty1,duty2,duty3;
 int main(void)
 {
-    P3SEL0 |= BIT4 + BIT5 +BIT6;
+	//Disable High Impedance mode
+    PM5CTL0 &= ~LOCKLPM5;
+	//Select the PWM feature of pins 3.3, 3.4, 3.5
+    P3SEL0 |= (BIT4 + BIT5 +BIT6);
+	//Set the aforementioned pins as outputs
     P3DIR|= BIT4 + BIT5 +BIT6;
 
-      TB0CCTL3 += OUTMOD_7;
-      TB0CCTL4 += OUTMOD_7;
-      TB0CCTL5 += OUTMOD_7;
-      TB0CTL = TASSEL_2 + MC_1;
-      TB0CCR0 = 255;
+	//Initialise Timer module to act in the Reset/Set configuration
+    TB0CCTL3 += OUTMOD_7;
+    TB0CCTL4 += OUTMOD_7;
+    TB0CCTL5 += OUTMOD_7;
+	//Initialise CCR registers to 255 (high voltage, due to common annode LED)
+    TB0CCR3 = 255;
+    TB0CCR4 = 255;
+    TB0CCR5 = 255;
+	//Initialise Clock to be based off SMClk and in up mode
+    TB0CTL = TASSEL_2 + MC_1 ;
+	//Set Period
+    TB0CCR0 = 255;
 
 
 
@@ -95,7 +36,7 @@ int main(void)
 
     // Disable the GPIO power-on default high-impedance mode to activate
     // previously configured port settings
-    PM5CTL0 &= ~LOCKLPM5;
+
 
     // Startup clock system with max DCO setting ~8MHz
     CSCTL0_H = CSKEY_H;                     // Unlock CS registers
@@ -120,18 +61,23 @@ int main(void)
     __bis_SR_register(LPM3_bits | GIE);     // Enter LPM3, interrupts enabled
     __no_operation();                       // For debugger
 }
-
+//Set Duty cycles based on the received values
 void setPWMDuty(int duty, int color)
 {
     switch(color){
         case 1:
-            TB0CCR3 = duty;
+		//Subtract 255, as we need to invert our voltage, since the pins should be at a lower potential relative 
+		//to the common annode
+            TB0CCR3 = (255-duty);
+            duty1=duty;
             break;
         case 2:
-            TB0CCR4 = duty;
+            TB0CCR4 = (255-duty);
+            duty2=duty;
             break;
         case 3:
-            TB0CCR5 = duty;
+            TB0CCR5 = (255-duty);
+            duty3=duty;
             break;
     }
 
@@ -155,17 +101,30 @@ void __attribute__ ((interrupt(EUSCI_A0_VECTOR))) USCI_A0_ISR (void)
         case USCI_UART_UCRXIFG:
             while(!(UCA0IFG&UCTXIFG));
             if(byteCount == 0){
+				//Enter this block if it is the first byte
                 totalBytes = UCA0RXBUF;
-                UCA0TXBUF = UCA0RXBUF - 0x03;
+                if(totalBytes<5){
+					//Enter this block if we do not have the minimum 5 bytes (meaning we are the end of the message)
+                    UCA0TXBUF = UCA0RXBUF;
+                }else{
+					//Immediately transfer the size of the next byte set, so that the next processor can begin processing,
+					//while we are working with out own values.
+                    UCA0TXBUF = UCA0RXBUF - 0x03;
+                }
                 byteCount++;
-            }else if(byteCount<4){
+            }else if(byteCount<4 && totalBytes>5){
                 setPWMDuty(UCA0RXBUF,byteCount);
                 byteCount++;
             }else{
+				//Enter this block once we are transmitting the remaining RGB bytes.
+				//We do not take into account any sort of stop byte, as we are assuming that inputs
+				//will be perfect
                 UCA0TXBUF = UCA0RXBUF;
                 byteCount++;
             }
-            if(byteCount == totalBytes-4){
+            if(byteCount == totalBytes){
+				//Reset the byte count, and wait for the next message. LED's will hold their values until
+				//a new message is received
                 byteCount = 0;
             }
 
