@@ -17,10 +17,10 @@ int main(void)
     TB0CCTL3 += OUTMOD_7;
     TB0CCTL4 += OUTMOD_7;
     TB0CCTL5 += OUTMOD_7;
-	//Initialise CCR registers to 255 (high voltage, due to common annode LED)
-    TB0CCR3 = 255;
-    TB0CCR4 = 255;
-    TB0CCR5 = 255;
+	//Initialise CCR registers to 0
+    TB0CCR3 = 0;
+    TB0CCR4 = 0;
+    TB0CCR5 = 0;
 	//Initialise Clock to be based off SMClk and in up mode
     TB0CTL = TASSEL_2 + MC_1 ;
 	//Set Period
@@ -68,15 +68,15 @@ void setPWMDuty(int duty, int color)
         case 1:
 		//Subtract 255, as we need to invert our voltage, since the pins should be at a lower potential relative 
 		//to the common annode
-            TB0CCR3 = (255-duty);
+            TB0CCR3 = (duty);
             duty1=duty;
             break;
         case 2:
-            TB0CCR4 = (255-duty);
+            TB0CCR4 = (duty);
             duty2=duty;
             break;
         case 3:
-            TB0CCR5 = (255-duty);
+            TB0CCR5 = (duty);
             duty3=duty;
             break;
     }
@@ -112,7 +112,7 @@ void __attribute__ ((interrupt(EUSCI_A0_VECTOR))) USCI_A0_ISR (void)
                     UCA0TXBUF = UCA0RXBUF - 0x03;
                 }
                 byteCount++;
-            }else if(byteCount<4 && totalBytes>5){
+            }else if(byteCount<4 && totalBytes>=5){
                 setPWMDuty(UCA0RXBUF,byteCount);
                 byteCount++;
             }else{
